@@ -1,0 +1,16 @@
+Project Proposal (Draft Email)
+
+Scope: 
+Beagle Bone Black
+Temperature Sensor (thermistor)
+Traffic Light LEDs (Real-time display of temperature levels)
+Other LEDs (for mock 'stove control')
+
+Features:
+- Implement server-based bi-directional control of the stove (mock stove control LEDs) and timer & interrupt-based temperature readings. 
+- Implement a simple voltage-divider analog front end for thermistor reading w. a simple comparator circuit for input. (see circuit diagram below). 
+- Implement a server + webapp through GitHub's app development system & servers. The embedded hardware will be writing to this webapp. (Not sure if webapp will be locally hosted yet). 
+- Will reduce rootfs.img and boot.img files & implement sleep modes to minimize the power consumption of this proof-of concept system. Ideally, this system would be running on a low-power, lightweight embedded processor. 
+
+
+We already have all the hardware for temperature sensing and comparator (i.e. nothing needs to be purchased). Will build this circuit on a breadboard, will take <1 hr. 
