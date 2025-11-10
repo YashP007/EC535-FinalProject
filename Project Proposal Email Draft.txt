@@ -18,4 +18,14 @@ Features:
 - Will reduce rootfs.img and boot.img files & implement sleep modes to minimize the power consumption of this proof-of concept system. Ideally, this system would be running on a low-power, lightweight embedded processor. 
 
 
-We already have all the hardware for temperature sensing and comparator (i.e. nothing needs to be purchased). Will build this circuit on a breadboard, will take <1 hr. 
+We already have all the hardware for temperature sensing and comparator (i.e. nothing needs to be purchased). 
+
+Sincerely, 
+Yash Patel and Leah Jones 
+
+
+
+
+
+
+Will build this circuit on a breadboard, will take <1 hr. 
