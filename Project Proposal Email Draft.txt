@@ -1,5 +1,10 @@
 Project Proposal (Draft Email)
 
+Hello Professor, 
+
+We would like to implement a temperature monitoring device with various features. More information cited below: 
+
+
 Scope: 
 Beagle Bone Black
 Temperature Sensor (thermistor)
