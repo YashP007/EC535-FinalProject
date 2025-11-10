@@ -24,8 +24,31 @@ Sincerely,
 Yash Patel and Leah Jones 
 
 
+=================================
+Alt email draft: 
+=================================
+Subject: EC535 Project Proposal
 
+Hello Professor Coskun,
 
+We’d like to propose a project centered on designing a small embedded system for temperature monitoring and control, using a smart-stove scenario as the application context. Our aim is to highlight core embedded system concepts: hardware/software co-design, interrupt handling, simple analog front ends, scheduling, power management, and lightweight communication between the device and a remote interface.
 
+Hardware
+• BeagleBone Black
+• Thermistor with voltage divider
+• Comparator circuit to generate an interrupt when temperature crosses a set threshold
+• Traffic-light LEDs to show real-time temperature ranges
+• Additional LEDs to serve as the mock stove controls
 
-Will build this circuit on a breadboard, will take <1 hr. 
+Planned Features
+• Use timer-based sampling and comparator-triggered interrupts to acquire temperature data.
+• Implement a small server plus simple web interface that supports bidirectional control of the mock stove LEDs and displays system status.
+• Explore power-aware behavior by trimming the root filesystem and testing basic sleep modes on the BeagleBone.
+• Demonstrate end-to-end behavior: sensing, interrupt response, local actuation, and remote control.
+
+All sensing and comparator hardware is already available, and we can assemble the prototype on a breadboard quickly.
+
+Please let us know if this scope aligns with project expectations or if you recommend any adjustments.
+
+Best,
+Yash Patel and Leah Jones
