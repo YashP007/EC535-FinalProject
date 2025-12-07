@@ -73,8 +73,8 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* Setup terminal for non-blocking input */
-    setup_terminal();
+    /* Setup terminal - keep canonical mode for better compatibility */
+    /* Note: We don't modify terminal settings to avoid blocking issues */
 
     /* Read initial status */
     read_comparator_status();
@@ -305,8 +305,6 @@ static void *comparator_monitor_thread(void *arg)
 {
     struct pollfd pfd;
     char buffer[BUFFER_SIZE];
-    time_t last_status_read = 0;
-    const time_t status_interval = 2; /* Read status every 2 seconds */
 
     (void)arg;
 
@@ -314,23 +312,47 @@ static void *comparator_monitor_thread(void *arg)
     pfd.events = POLLIN | POLLRDNORM;
 
     printf("[Monitor] Comparator monitor thread started\n");
+    printf("[Monitor] Waiting for events from kernel module...\n");
 
+    /* Read initial status */
+    if (read_comparator_status() == 0) {
+        update_led_temp_state(comparator_state);
+        print_status(comparator_state, stove_state, comparator_triggered);
+    }
+
+    /* Continuously wait for events from kernel module */
     while (running) {
         int ret;
-        time_t now;
 
-        /* Poll for comparator events (interrupts and timer updates) */
-        ret = poll(&pfd, 1, 1000); /* 1 second timeout */
+        /* Poll indefinitely for comparator events (interrupts and timer updates) */
+        /* Block until kernel module wakes us up via wait queue */
+        ret = poll(&pfd, 1, -1); /* -1 = block indefinitely until event */
+
+        if (ret < 0) {
+            if (errno == EINTR) {
+                /* Interrupted by signal, continue */
+                continue;
+            }
+            perror("poll");
+            break;
+        }
 
         if (ret > 0 && (pfd.revents & (POLLIN | POLLRDNORM))) {
-            /* Event occurred - read notification */
+            /* Event occurred - read notification from kernel */
             ssize_t n = read(temp_fd, buffer, sizeof(buffer) - 1);
+            if (n < 0) {
+                if (errno == EINTR || errno == EAGAIN)
+                    continue;
+                perror("read");
+                break;
+            }
+            
             if (n > 0) {
                 buffer[n] = '\0';
                 
                 /* Check message type */
                 if (strstr(buffer, "THRESHOLD_EXCEEDED") != NULL) {
-                    /* Interrupt event - threshold exceeded */
+                    /* Interrupt event - threshold exceeded (rising edge) */
                     printf("\n[!] THRESHOLD EXCEEDED - Comparator triggered!\n");
                     printf("    %s", buffer);
                     comparator_triggered = 1;
@@ -342,7 +364,7 @@ static void *comparator_monitor_thread(void *arg)
                     /* Display updated status */
                     print_status(comparator_state, stove_state, comparator_triggered);
                 } else if (strstr(buffer, "STATUS_UPDATE") != NULL) {
-                    /* Timer update - periodic status */
+                    /* Timer update - periodic status from kernel timer */
                     printf("\n[Timer] %s", buffer);
                     
                     /* Parse the status update */
@@ -369,23 +391,9 @@ static void *comparator_monitor_thread(void *arg)
                 }
             }
         }
-
-        /* Periodically read status to keep display updated */
-        now = time(NULL);
-        if (now - last_status_read >= status_interval) {
-            if (read_comparator_status() == 0) {
-                /* Update LED state based on comparator */
-                update_led_temp_state(comparator_state);
-                
-                /* Display status */
-                print_status(comparator_state, stove_state, comparator_triggered);
-                
-                last_status_read = now;
-            }
-        }
     }
 
-    printf("[Monitor] Comparator monitor thread stopped\n");
+    printf("\n[Monitor] Comparator monitor thread stopped\n");
     return NULL;
 }
 
@@ -398,9 +406,10 @@ static void *user_input_thread(void *arg)
     (void)arg;
 
     printf("[Input] User input handler started\n");
+    printf("[Input] Ready for commands (type 'q' to quit)\n");
 
     while (running) {
-        /* Read user input */
+        /* Read user input (blocking) */
         if (fgets(input, sizeof(input), stdin) != NULL) {
             /* Remove newline */
             n = strlen(input);
@@ -454,10 +463,14 @@ static void *user_input_thread(void *arg)
         } else {
             /* Check if stdin was closed or error occurred */
             if (feof(stdin)) {
+                printf("[Input] stdin closed, exiting...\n");
                 running = 0;
                 break;
             }
-            usleep(100000); /* 100ms sleep to avoid busy-waiting */
+            if (ferror(stdin)) {
+                perror("fgets");
+                break;
+            }
         }
     }
 
@@ -501,32 +514,12 @@ static struct termios old_termios;
 
 static void setup_terminal(void)
 {
-    struct termios new_termios;
-
-    /* Save old terminal settings */
-    if (tcgetattr(STDIN_FILENO, &old_termios) < 0) {
-        perror("tcgetattr");
-        return;
-    }
-
-    /* Get new terminal settings */
-    new_termios = old_termios;
-
-    /* Disable canonical mode and echo (for better input handling) */
-    new_termios.c_lflag &= ~(ICANON | ECHO);
-    new_termios.c_cc[VMIN] = 0;
-    new_termios.c_cc[VTIME] = 0;
-
-    /* Apply new settings */
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &new_termios) < 0) {
-        perror("tcsetattr");
-    }
+    /* Keep terminal in canonical mode for compatibility */
+    /* This allows the program to block properly on fgets() */
+    (void)old_termios; /* Suppress unused variable warning */
 }
 
 static void restore_terminal(void)
 {
-    /* Restore old terminal settings */
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &old_termios) < 0) {
-        perror("tcsetattr restore");
-    }
+    /* No terminal restoration needed since we didn't modify it */
 }

@@ -121,6 +121,7 @@
 #include <linux/sched.h>
 #include <linux/wait.h>
 #include <linux/poll.h>
+#include <linux/spinlock.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("Temperature sensor kernel module for BBB (Comparator-Only)");
@@ -190,6 +191,10 @@ static unsigned long check_period_ms = 1000;                 /* Timer period in 
 static DECLARE_WAIT_QUEUE_HEAD(temp_wait_queue);
 static atomic_t data_available = ATOMIC_INIT(0);           /* New data available flag */
 
+/* --- Globals: Notification message buffer --- */
+static char *notification_buffer = NULL;  /* Buffer for notification messages */
+static DEFINE_SPINLOCK(notification_lock); /* Lock for notification buffer */
+
 /* --- Timer for periodic checking --- */
 static DEFINE_TIMER(temp_timer, temp_timer_callback);
 
@@ -216,11 +221,20 @@ static int mytempsensor_init(void)
   memset(mytempsensor_buffer, 0, capacity);
   mytempsensor_len = 0;
 
+  /* Allocate notification message buffer */
+  notification_buffer = kmalloc(capacity, GFP_KERNEL);
+  if (!notification_buffer) {
+    printk(KERN_ALERT "mytempsensor_comp: insufficient kernel memory for notifications\n");
+    result = -ENOMEM;
+    goto fail_notif;
+  }
+  memset(notification_buffer, 0, capacity);
+
   /* Request and configure GPIO for comparator */
   result = temp_gpio_request_config();
   if (result) {
     printk(KERN_ALERT "mytempsensor_comp: gpio request/config failed (%d)\n", result);
-    goto fail_buf;
+    goto fail_notif;
   }
 
   /* Request IRQ for comparator */
@@ -244,6 +258,9 @@ static int mytempsensor_init(void)
 
 fail_gpio:
   temp_gpio_free();
+fail_notif:
+  kfree(notification_buffer);
+  notification_buffer = NULL;
 fail_buf:
   kfree(mytempsensor_buffer);
 fail_chrdev:
@@ -263,8 +280,12 @@ static void mytempsensor_exit(void)
   /* Unregister char device */
   unregister_chrdev(mytempsensor_major, "mytempsensor_comp");
 
-  /* Free buffer */
+  /* Free buffers */
   kfree(mytempsensor_buffer);
+  if (notification_buffer) {
+    kfree(notification_buffer);
+    notification_buffer = NULL;
+  }
 
   printk(KERN_INFO "mytempsensor_comp: module removed\n");
 }
@@ -283,30 +304,60 @@ static int mytempsensor_release(struct inode *inode, struct file *filp)
 
 static ssize_t mytempsensor_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
 {
-  /* Return status information */
-  char tbuf[512];
+  /* Return notification message if available, otherwise return status */
   int n;
+  char *src_buf;
+  int src_len;
 
-  /* Build fresh status string each read start */
+  /* Reset position if starting new read */
   if (*f_pos == 0) {
-    n = temp_build_status(tbuf, sizeof(tbuf));
-    n = min(n, (int)capacity);
-    memcpy(mytempsensor_buffer, tbuf, n);
-    mytempsensor_len = n;
-    atomic_set(&data_available, 0);
+    unsigned long flags;
+    
+    spin_lock_irqsave(&notification_lock, flags);
+    
+    /* Check if there's a notification message available */
+    if (atomic_read(&data_available) && notification_buffer && 
+        strlen(notification_buffer) > 0) {
+      /* Copy notification message to main buffer for reading */
+      src_len = strlen(notification_buffer);
+      if (src_len >= capacity)
+        src_len = capacity - 1;
+      memcpy(mytempsensor_buffer, notification_buffer, src_len);
+      mytempsensor_buffer[src_len] = '\0';
+      mytempsensor_len = src_len;
+      
+      /* Clear notification after copying */
+      memset(notification_buffer, 0, capacity);
+      atomic_set(&data_available, 0);
+    } else {
+      /* No notification, return status string */
+      char tbuf[512];
+      n = temp_build_status(tbuf, sizeof(tbuf));
+      n = min(n, (int)capacity);
+      memcpy(mytempsensor_buffer, tbuf, n);
+      mytempsensor_len = n;
+      src_len = n;
+    }
+    
+    spin_unlock_irqrestore(&notification_lock, flags);
+    src_buf = mytempsensor_buffer;
+  } else {
+    /* Continue reading from buffer */
+    src_buf = mytempsensor_buffer;
+    src_len = mytempsensor_len;
   }
 
   /* EOF if f_pos at end */
-  if (*f_pos >= mytempsensor_len)
+  if (*f_pos >= src_len)
     return 0;
 
   /* Do not exceed tail or user's count */
-  if (count > mytempsensor_len - *f_pos)
-    count = mytempsensor_len - *f_pos;
+  if (count > src_len - *f_pos)
+    count = src_len - *f_pos;
   if (count > bite)
     count = bite;
 
-  if (copy_to_user(buf, mytempsensor_buffer + *f_pos, count))
+  if (copy_to_user(buf, src_buf + *f_pos, count))
     return -EFAULT;
 
   *f_pos += count;
@@ -472,6 +523,22 @@ static void temp_notify_comparator_triggered(void)
 /* Notify userspace of threshold events */
 static void temp_notify_userspace(const char *message)
 {
+  unsigned long flags;
+  size_t msg_len;
+  
+  if (!message || !notification_buffer)
+    return;
+  
+  msg_len = strlen(message);
+  if (msg_len >= capacity)
+    msg_len = capacity - 1;
+  
+  /* Store notification message in buffer (protected by spinlock) */
+  spin_lock_irqsave(&notification_lock, flags);
+  memcpy(notification_buffer, message, msg_len);
+  notification_buffer[msg_len] = '\0';
+  spin_unlock_irqrestore(&notification_lock, flags);
+  
   /* Set data available flag for poll/select */
   atomic_set(&data_available, 1);
   
@@ -507,11 +574,18 @@ static void temp_parse_write_command(const char *buf, size_t count)
 
   if (strncmp(buf, "period=", 7) == 0) {
     if (kstrtoul(buf + 7, 10, &val) == 0 && val >= 100 && val <= 60000) {
+      unsigned long old_period = check_period_ms;
       check_period_ms = val;
-      printk(KERN_INFO "mytempsensor_comp: check period set to %lu ms\n", check_period_ms);
-      /* Reschedule timer with new period */
-      del_timer_sync(&temp_timer);
+      printk(KERN_INFO "mytempsensor_comp: check period changed from %lu ms to %lu ms\n", 
+             old_period, check_period_ms);
+      
+      /* Delete timer if it's pending (non-blocking) */
+      del_timer(&temp_timer);
+      
+      /* Reschedule timer with new period immediately */
       temp_schedule_next_check();
+      
+      printk(KERN_INFO "mytempsensor_comp: timer rescheduled with new period\n");
     } else {
       printk(KERN_WARNING "mytempsensor_comp: invalid period value (range: 100-60000 ms)\n");
     }
