@@ -39,22 +39,26 @@ static double simple_log(double x)
    * For better accuracy, we use: ln(x) = 2 * ((x-1)/(x+1) + ((x-1)/(x+1))³/3 + ...)
    * Simplified approximation for x > 0
    */
+  double result = 0.0;
+  double term;
+  double power;
+  double y;
+  int i;
+  
   if (x <= 0) return -1000.0; /* Invalid */
   if (x == 1.0) return 0.0;
   
   /* For values near 1, use direct approximation */
   if (x > 0.5 && x < 2.0) {
-    double y = (x - 1.0) / (x + 1.0);
+    y = (x - 1.0) / (x + 1.0);
     return 2.0 * (y + (y * y * y) / 3.0);
   }
   
   /* For other values, use iterative method or lookup */
   /* Simple approximation: ln(x) ≈ (x-1) - (x-1)²/2 for x near 1 */
   /* For general case, we'll use a polynomial approximation */
-  double result = 0.0;
-  double term = (x - 1.0) / x;
-  double power = term;
-  int i;
+  term = (x - 1.0) / x;
+  power = term;
   
   for (i = 1; i < 20; i++) {
     result += power / i;
@@ -67,7 +71,7 @@ static double simple_log(double x)
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("Temperature sensor kernel module for BBB");
-MODULE_AUTHOR("EC535 Final Project");
+MODULE_AUTHOR("Yash Patel");
 
 /* --- GPIO assignments (BBB header numbers -> kernel GPIO numbers)
  * TODO: verify these numeric GPIO IDs against your wiring.
@@ -124,6 +128,7 @@ static void temp_notify_userspace(const char *message);
 /* --- Forward declarations: userspace interface --- */
 static int  temp_build_status(char *dst, size_t maxlen);
 static void temp_parse_write_command(const char *buf, size_t count);
+static int  temp_parse_double(const char *str, double *result);
 
 /* --- File operations table --- */
 static struct file_operations mytempsensor_fops = {
@@ -155,7 +160,6 @@ static unsigned long measurement_period_ms = 1000;          /* Timer period in m
 
 /* --- Globals: ADC state --- */
 static atomic_t adc_awake = ATOMIC_INIT(0);                 /* ADC awake state */
-static struct file *adc_sysfs_file = NULL;                  /* File handle for ADC sysfs */
 
 /* --- Globals: Wait queue for poll/select --- */
 static DECLARE_WAIT_QUEUE_HEAD(temp_wait_queue);
@@ -642,6 +646,73 @@ static int temp_build_status(char *dst, size_t maxlen)
   return n;
 }
 
+/* Simple double parser for kernel space (replaces kstrtod which doesn't exist) */
+static int temp_parse_double(const char *str, double *result)
+{
+  long int_part = 0;
+  long frac_part = 0;
+  int frac_digits = 0;
+  int negative = 0;
+  const char *p = str;
+  
+  if (!str || !result)
+    return -1;
+  
+  /* Skip whitespace */
+  while (*p == ' ' || *p == '\t')
+    p++;
+  
+  /* Check for negative sign */
+  if (*p == '-') {
+    negative = 1;
+    p++;
+  } else if (*p == '+') {
+    p++;
+  }
+  
+  /* Parse integer part */
+  if (*p < '0' || *p > '9')
+    return -1;
+  
+  while (*p >= '0' && *p <= '9') {
+    int_part = int_part * 10 + (*p - '0');
+    p++;
+  }
+  
+  /* Parse fractional part if decimal point exists */
+  if (*p == '.') {
+    p++;
+    while (*p >= '0' && *p <= '9' && frac_digits < 10) {
+      frac_part = frac_part * 10 + (*p - '0');
+      frac_digits++;
+      p++;
+    }
+  }
+  
+  /* Skip trailing whitespace */
+  while (*p == ' ' || *p == '\t')
+    p++;
+  
+  /* Must have consumed entire string (or reached end) */
+  if (*p != '\0' && *p != '\n' && *p != '\r')
+    return -1;
+  
+  /* Combine integer and fractional parts */
+  *result = (double)int_part;
+  if (frac_digits > 0) {
+    double frac_divisor = 1.0;
+    int i;
+    for (i = 0; i < frac_digits; i++)
+      frac_divisor *= 10.0;
+    *result += (double)frac_part / frac_divisor;
+  }
+  
+  if (negative)
+    *result = -(*result);
+  
+  return 0;
+}
+
 /* Parse write commands from userspace:
  * Commands:
  *   "ref_temp=<F>" - set reference temperature in Fahrenheit
@@ -653,10 +724,10 @@ static void temp_parse_write_command(const char *buf, size_t count)
   double temp_val;
 
   if (strncmp(buf, "ref_temp=", 9) == 0) {
-    /* Parse double value using kstrtod (available in kernel 4.19+) */
+    /* Parse double value using manual parser */
     const char *num_str = buf + 9;
     
-    if (kstrtod(num_str, &temp_val) == 0 && temp_val >= -459.67 && temp_val <= 1000.0) {
+    if (temp_parse_double(num_str, &temp_val) == 0 && temp_val >= -459.67 && temp_val <= 1000.0) {
       reference_temperature_f = temp_val;
       printk(KERN_INFO "mytempsensor: reference temperature set to %.1f°F\n", reference_temperature_f);
     } else {
