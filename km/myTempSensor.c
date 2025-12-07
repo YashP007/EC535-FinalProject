@@ -3,6 +3,116 @@
  * Kernel module for BeagleBone Black to sense temperature from thermistor-based
  * resistive divider using BBB ADC. Features timer-based measurements and
  * hardware comparator IRQ for immediate threshold detection.
+ *
+ * ============================================================================
+ * USERSPACE INTERFACE DOCUMENTATION
+ * ============================================================================
+ *
+ * Device File: /dev/mytempsensor (major 62, minor 0)
+ *
+ * After loading the module, create the device file:
+ *   sudo mknod /dev/mytempsensor c 62 0
+ *   sudo chmod 666 /dev/mytempsensor
+ *
+ * ----------------------------------------------------------------------------
+ * READING STATUS
+ * ----------------------------------------------------------------------------
+ *
+ * Read current temperature and module status:
+ *   cat /dev/mytempsensor
+ *
+ * Output format:
+ *   temp=<temp>°F ref_temp=<ref>°F period=<ms> adc_above=<0|1> comparator=<0|1> comparator_gpio=<0|1> adc_awake=<0|1>
+ *
+ * Example output:
+ *   temp=75.5°F ref_temp=150.0°F period=1000 ms adc_above=0 comparator=0 comparator_gpio=0 adc_awake=1
+ *
+ * ----------------------------------------------------------------------------
+ * WRITING COMMANDS (Changing Parameters)
+ * ----------------------------------------------------------------------------
+ *
+ * Write commands to /dev/mytempsensor to change module parameters:
+ *
+ * 1. Set Reference Temperature Threshold:
+ *    echo "ref_temp=<temperature>" > /dev/mytempsensor
+ *
+ *    Parameters:
+ *      <temperature> - Temperature in Fahrenheit (supports decimals)
+ *                      Range: -459.67 to 1000.0°F
+ *                      Default: 150.0°F
+ *
+ *    Examples:
+ *      echo "ref_temp=150.0" > /dev/mytempsensor    # Set to 150°F
+ *      echo "ref_temp=200" > /dev/mytempsensor      # Set to 200°F
+ *      echo "ref_temp=75.5" > /dev/mytempsensor     # Set to 75.5°F
+ *
+ * 2. Set Measurement Period (Timer Interval):
+ *    echo "period=<milliseconds>" > /dev/mytempsensor
+ *
+ *    Parameters:
+ *      <milliseconds> - Timer period in milliseconds
+ *                       Range: 100 to 60000 ms
+ *                       Default: 1000 ms (1 second)
+ *
+ *    Examples:
+ *      echo "period=1000" > /dev/mytempsensor       # 1 second intervals
+ *      echo "period=500" > /dev/mytempsensor         # 0.5 second intervals
+ *      echo "period=5000" > /dev/mytempsensor        # 5 second intervals
+ *
+ * ----------------------------------------------------------------------------
+ * INTERRUPT-DRIVEN NOTIFICATIONS (poll/select)
+ * ----------------------------------------------------------------------------
+ *
+ * The module supports poll()/select() for interrupt-driven notifications.
+ * When a temperature threshold is exceeded (either by ADC measurement or
+ * hardware comparator), the module wakes up waiting processes.
+ *
+ * Usage in C program:
+ *   #include <poll.h>
+ *   
+ *   int fd = open("/dev/mytempsensor", O_RDONLY);
+ *   struct pollfd pfd;
+ *   pfd.fd = fd;
+ *   pfd.events = POLLIN | POLLRDNORM;
+ *   
+ *   // Wait for threshold event (with timeout)
+ *   int ret = poll(&pfd, 1, 5000);  // 5 second timeout
+ *   
+ *   if (ret > 0 && (pfd.revents & POLLIN)) {
+ *       // Threshold event occurred - read notification
+ *       char buf[512];
+ *       read(fd, buf, sizeof(buf));
+ *       printf("Event: %s", buf);
+ *   }
+ *
+ * ----------------------------------------------------------------------------
+ * DEFAULT VALUES
+ * ----------------------------------------------------------------------------
+ *
+ * - Reference Temperature: 150.0°F
+ * - Measurement Period: 1000 ms (1 second)
+ * - ADC Channel: 0 (AIN0)
+ * - Comparator GPIO: 26
+ *
+ * ----------------------------------------------------------------------------
+ * MODULE OPERATION
+ * ----------------------------------------------------------------------------
+ *
+ * The module operates in two modes:
+ *
+ * 1. Timer-based measurements:
+ *    - Periodically reads ADC and calculates temperature
+ *    - Compares against software threshold (ref_temp)
+ *    - Updates status on each measurement
+ *
+ * 2. Hardware comparator interrupts:
+ *    - Monitors GPIO 26 for hardware comparator signals
+ *    - Immediately notifies userspace when triggered
+ *    - Works in parallel with timer-based measurements
+ *
+ * Both modes can trigger threshold notifications via poll()/select().
+ *
+ * ============================================================================
  */
 
 /* --- Includes: core driver headers --- */
