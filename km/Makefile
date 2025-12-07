@@ -15,10 +15,13 @@ modules:
 ul_program: ul_program.c
 	$(CC) -o ul_program ul_program.c -lpthread -Wall -Wextra
 
-all: modules ul_program
+ul_program_comp: ul_program_comp.c
+	$(CC) -o ul_program_comp ul_program_comp.c -lpthread -Wall -Wextra
+
+all: modules ul_program ul_program_comp
 
 clean:
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) ARCH=$(ARCH) clean
-	rm -f ul_program
+	rm -f ul_program ul_program_comp
 
 endif

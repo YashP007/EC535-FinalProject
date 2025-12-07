@@ -153,6 +153,7 @@ static void temp_irq_free(void);
 static void temp_timer_callback(struct timer_list *t);
 static void temp_schedule_next_check(void);
 static void temp_check_comparator(void);
+static void temp_notify_comparator_triggered(void);
 static void temp_notify_userspace(const char *message);
 
 /* --- Forward declarations: userspace interface --- */
@@ -181,7 +182,8 @@ static int   mytempsensor_len;
 static int comparator_irq = -1;          /* assigned by request_irq */
 
 /* --- Globals: Comparator state --- */
-static atomic_t comparator_triggered = ATOMIC_INIT(0);      /* Hardware comparator triggered */
+static atomic_t comparator_triggered = ATOMIC_INIT(0);      /* Hardware comparator triggered (set on rising edge) */
+static int comparator_previous_state = 0;                   /* Previous GPIO state for edge detection */
 static unsigned long check_period_ms = 1000;                 /* Timer period in milliseconds (default 1s) */
 
 /* --- Globals: Wait queue for poll/select --- */
@@ -227,6 +229,9 @@ static int mytempsensor_init(void)
     printk(KERN_ALERT "mytempsensor_comp: irq request failed (%d)\n", result);
     goto fail_gpio;
   }
+
+  /* Initialize previous state by reading current GPIO state */
+  comparator_previous_state = gpio_get_value(COMPARATOR_GPIO);
 
   /* Start periodic timer for comparator checking */
   temp_schedule_next_check();
@@ -368,11 +373,15 @@ static void temp_gpio_free(void)
 /* IRQ handler for comparator */
 static irqreturn_t comparator_isr(int irq, void *dev_id)
 {
-  /* Hardware comparator triggered (active high) */
-  atomic_set(&comparator_triggered, 1);
+  /* Hardware comparator triggered (rising edge: low -> high) */
+  int comp_current = gpio_get_value(COMPARATOR_GPIO);
   
-  /* Check comparator and notify */
-  temp_check_comparator();
+  /* Only notify if this is a new transition (edge-triggered) */
+  if (comp_current && !comparator_previous_state) {
+    atomic_set(&comparator_triggered, 1);
+    comparator_previous_state = 1;  /* Update previous state */
+    temp_notify_comparator_triggered();
+  }
   
   return IRQ_HANDLED;
 }
@@ -411,7 +420,8 @@ static void temp_irq_free(void)
 
 static void temp_timer_callback(struct timer_list *t)
 {
-  /* Timer expired - check comparator state */
+  /* Timer expired - check comparator state and notify userspace with current status */
+  /* Timer provides periodic status updates, interrupt provides immediate edge detection */
   temp_check_comparator();
 
   /* Schedule next check */
@@ -424,31 +434,39 @@ static void temp_schedule_next_check(void)
   mod_timer(&temp_timer, jiffies + interval);
 }
 
-/* Check comparator state and notify userspace if triggered */
+/* Check comparator state (called by timer - provides periodic status updates) */
 static void temp_check_comparator(void)
 {
-  int comp_triggered = atomic_read(&comparator_triggered);
+  int comp_current = gpio_get_value(COMPARATOR_GPIO);
+  char msg[256];
+  
+  /* Update previous state for next check */
+  comparator_previous_state = comp_current;
+  
+  /* Timer provides periodic status updates to userspace */
+  snprintf(msg, sizeof(msg),
+           "STATUS_UPDATE: Comparator state=%d (GPIO=%d, active=%s)\n",
+           comp_current, COMPARATOR_GPIO, comp_current ? "HIGH" : "LOW");
+  
+  temp_notify_userspace(msg);
+}
+
+/* Notify userspace that comparator triggered (called by interrupt only) */
+static void temp_notify_comparator_triggered(void)
+{
   int comp_current = gpio_get_value(COMPARATOR_GPIO);
   char msg[256];
 
-  /* If comparator is currently high, set triggered flag */
-  if (comp_current) {
-    atomic_set(&comparator_triggered, 1);
-    comp_triggered = 1;
-  }
+  /* Build notification message for rising edge event */
+  snprintf(msg, sizeof(msg),
+           "THRESHOLD_EXCEEDED: Comparator triggered (GPIO=%d, state=%d)\n",
+           COMPARATOR_GPIO, comp_current);
 
-  /* If comparator was triggered, notify userspace */
-  if (comp_triggered) {
-    /* Build notification message */
-    snprintf(msg, sizeof(msg),
-             "THRESHOLD_EXCEEDED: Comparator=%d (GPIO=%d, current=%d)\n",
-             comp_triggered, COMPARATOR_GPIO, comp_current);
+  temp_notify_userspace(msg);
 
-    temp_notify_userspace(msg);
-
-    /* Reset comparator flag after notification */
-    atomic_set(&comparator_triggered, 0);
-  }
+  /* Note: We don't reset comparator_triggered flag here because
+   * it's used to track that an event occurred. The flag will be
+   * read by status and can be cleared when read if desired. */
 }
 
 /* Notify userspace of threshold events */
