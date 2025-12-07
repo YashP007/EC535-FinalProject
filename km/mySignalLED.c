@@ -23,6 +23,8 @@
 #include <linux/string.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
+MODULE_AUTHOR("Yash Patel");
+MODULE_DESCRIPTION("Kernel module to control an RGB LED for embedded stove monitoring system.");
 
 /* --- GPIO assignments (BBB header numbers -> kernel GPIO numbers)
  * TODO: verify these numeric GPIO IDs against your wiring.
