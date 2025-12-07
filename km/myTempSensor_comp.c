@@ -122,6 +122,7 @@
 #include <linux/wait.h>
 #include <linux/poll.h>
 #include <linux/spinlock.h>
+#include <linux/fcntl.h>  /* For fasync support */
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("Temperature sensor kernel module for BBB (Comparator-Only)");
@@ -139,6 +140,7 @@ static int     mytempsensor_release(struct inode *inode, struct file *filp);
 static ssize_t mytempsensor_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
 static ssize_t mytempsensor_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
 static unsigned int mytempsensor_poll(struct file *filp, poll_table *wait);
+static int     mytempsensor_fasync(int fd, struct file *filp, int on);
 
 /* --- Forward declarations: module init/exit --- */
 static int  mytempsensor_init(void);
@@ -168,6 +170,7 @@ static struct file_operations mytempsensor_fops = {
   .open    = mytempsensor_open,
   .release = mytempsensor_release,
   .poll    = mytempsensor_poll,
+  .fasync  = mytempsensor_fasync,
 };
 
 /* --- Module entry/exit wiring --- */
@@ -190,6 +193,9 @@ static unsigned long check_period_ms = 1000;                 /* Timer period in 
 /* --- Globals: Wait queue for poll/select --- */
 static DECLARE_WAIT_QUEUE_HEAD(temp_wait_queue);
 static atomic_t data_available = ATOMIC_INIT(0);           /* New data available flag */
+
+/* --- Globals: fasync support for SIGIO --- */
+static struct fasync_struct *temp_fasync_queue = NULL;
 
 /* --- Globals: Notification message buffer --- */
 static char *notification_buffer = NULL;  /* Buffer for notification messages */
@@ -299,7 +305,14 @@ static int mytempsensor_open(struct inode *inode, struct file *filp)
 
 static int mytempsensor_release(struct inode *inode, struct file *filp)
 {
+  /* Remove this file from fasync queue */
+  mytempsensor_fasync(-1, filp, 0);
   return 0;
+}
+
+static int mytempsensor_fasync(int fd, struct file *filp, int on)
+{
+  return fasync_helper(fd, filp, on, &temp_fasync_queue);
 }
 
 static ssize_t mytempsensor_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
@@ -309,9 +322,14 @@ static ssize_t mytempsensor_read(struct file *filp, char __user *buf, size_t cou
   char *src_buf;
   int src_len;
 
-  /* Reset position if starting new read */
-  if (*f_pos == 0) {
+  /* Reset position if starting new read OR if we've finished previous read */
+  /* Always check for new notifications when starting a fresh read */
+  if (*f_pos == 0 || *f_pos >= mytempsensor_len) {
     unsigned long flags;
+    
+    /* If we finished previous read, reset position */
+    if (*f_pos >= mytempsensor_len)
+      *f_pos = 0;
     
     spin_lock_irqsave(&notification_lock, flags);
     
@@ -329,27 +347,32 @@ static ssize_t mytempsensor_read(struct file *filp, char __user *buf, size_t cou
       /* Clear notification after copying */
       memset(notification_buffer, 0, capacity);
       atomic_set(&data_available, 0);
+      
+      spin_unlock_irqrestore(&notification_lock, flags);
+      src_buf = mytempsensor_buffer;
     } else {
       /* No notification, return status string */
+      spin_unlock_irqrestore(&notification_lock, flags);
+      
       char tbuf[512];
       n = temp_build_status(tbuf, sizeof(tbuf));
       n = min(n, (int)capacity);
       memcpy(mytempsensor_buffer, tbuf, n);
       mytempsensor_len = n;
       src_len = n;
+      src_buf = mytempsensor_buffer;
     }
-    
-    spin_unlock_irqrestore(&notification_lock, flags);
-    src_buf = mytempsensor_buffer;
   } else {
     /* Continue reading from buffer */
     src_buf = mytempsensor_buffer;
     src_len = mytempsensor_len;
   }
 
-  /* EOF if f_pos at end */
-  if (*f_pos >= src_len)
+  /* EOF if f_pos at end - reset position for next notification */
+  if (*f_pos >= src_len) {
+    *f_pos = 0;  /* Reset position so next read will check for new notification */
     return 0;
+  }
 
   /* Do not exceed tail or user's count */
   if (count > src_len - *f_pos)
@@ -542,8 +565,11 @@ static void temp_notify_userspace(const char *message)
   /* Set data available flag for poll/select */
   atomic_set(&data_available, 1);
   
-  /* Wake up any waiting processes */
+  /* Wake up any waiting processes (for poll/select) */
   wake_up_interruptible(&temp_wait_queue);
+  
+  /* Send SIGIO signal (for fasync/O_ASYNC) */
+  kill_fasync(&temp_fasync_queue, SIGIO, POLL_IN);
   
   /* Also print to kernel log */
   printk(KERN_WARNING "mytempsensor_comp: %s", message);

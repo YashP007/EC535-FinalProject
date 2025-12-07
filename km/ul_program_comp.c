@@ -339,12 +339,23 @@ static void *comparator_monitor_thread(void *arg)
 
         if (ret > 0 && (pfd.revents & (POLLIN | POLLRDNORM))) {
             /* Event occurred - read notification from kernel */
+            /* Reset file position to start for new notification */
+            if (lseek(temp_fd, 0, SEEK_SET) < 0) {
+                perror("lseek");
+                break;
+            }
+            
             ssize_t n = read(temp_fd, buffer, sizeof(buffer) - 1);
             if (n < 0) {
                 if (errno == EINTR || errno == EAGAIN)
                     continue;
                 perror("read");
                 break;
+            }
+            
+            if (n == 0) {
+                /* EOF - no data available, continue polling */
+                continue;
             }
             
             if (n > 0) {
