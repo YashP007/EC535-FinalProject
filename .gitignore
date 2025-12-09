@@ -53,3 +53,4 @@ dkms.conf
 
 # debug information files
 *.dwo
+km/am335x-debian-13.2-base-v6.17-armhf-2025-11-18-4gb.img
