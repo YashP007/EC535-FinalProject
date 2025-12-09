@@ -15,17 +15,17 @@ make
 
 ### Load the module:
 ```bash
-sudo insmod mySignalLED.ko
+insmod mySignalLED.ko
 ```
 
 ### Unload the module:
 ```bash
-sudo rmmod mySignalLED
+rmmod mySignalLED
 ```
 
 ### Check module status:
 ```bash
-dmesg | tail -20
+dmesg -c -s 20
 ```
 
 ## Device File
