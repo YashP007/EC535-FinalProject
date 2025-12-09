@@ -188,7 +188,7 @@ static int comparator_irq = -1;          /* assigned by request_irq */
 /* --- Globals: Comparator state --- */
 static atomic_t comparator_triggered = ATOMIC_INIT(0);      /* Hardware comparator triggered (set on rising edge) */
 static int comparator_previous_state = 0;                   /* Previous GPIO state for edge detection */
-static unsigned long check_period_ms = 1000;                 /* Timer period in milliseconds (default 1s) */
+static unsigned long check_period_ms = 15000;                /* Timer period in milliseconds (default 15s) */
 
 /* --- Globals: Wait queue for poll/select --- */
 static DECLARE_WAIT_QUEUE_HEAD(temp_wait_queue);

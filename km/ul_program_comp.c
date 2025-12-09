@@ -6,6 +6,7 @@
  * - Controls LED based on comparator state
  * - Handles timer and interrupt events from comparator module
  * - Allows user to set stove state (on/off) and timer period
+ * - Periodically updates server with system state
  */
 
 #include <stdio.h>
@@ -29,14 +30,21 @@
 #define BUFFER_SIZE    512
 #define CMD_BUFFER     128
 
+/* Default timer period: 15 seconds */
+#define DEFAULT_TIMER_PERIOD_MS  15000
+
 /* Global state */
 static int temp_fd = -1;
 static int led_fd = -1;
 static volatile int running = 1;
 static int comparator_state = 0;      /* Current comparator state (0=LOW, 1=HIGH) */
 static int comparator_triggered = 0;  /* Flag if threshold was exceeded */
-static unsigned long check_period = 1000;  /* Timer period in ms */
+static volatile unsigned long check_period = DEFAULT_TIMER_PERIOD_MS;  /* Timer period in ms */
 static int stove_state = 0;  /* 0 = off, 1 = on */
+static int server_connected = 0;  /* Server connection status (updated by update_server) */
+
+/* Mutex for thread-safe access to shared state */
+static pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Function prototypes */
 static int open_devices(void);
@@ -45,7 +53,10 @@ static int read_comparator_status(void);
 static int update_led_temp_state(int comp_state);
 static int set_stove_state(int on);
 static int set_timer_period(unsigned long period);
+static int set_server_led_state(int connected);
+static int update_server(void);
 static void *comparator_monitor_thread(void *arg);
+static void *server_update_thread(void *arg);
 static void *user_input_thread(void *arg);
 static void signal_handler(int sig);
 static void print_status(int comp_state, int stove_on, int triggered);
@@ -79,6 +90,11 @@ int main(int argc, char *argv[])
     /* Read initial status */
     read_comparator_status();
 
+    /* Set timer period to default (15 seconds) on startup */
+    if (set_timer_period(DEFAULT_TIMER_PERIOD_MS) < 0) {
+        fprintf(stderr, "Warning: Failed to set initial timer period\n");
+    }
+
     printf("Devices opened successfully\n");
     printf("Comparator GPIO: 26\n");
     printf("Current comparator state: %s\n", comparator_state ? "HIGH" : "LOW");
@@ -99,6 +115,15 @@ int main(int argc, char *argv[])
         goto cleanup;
     }
 
+    /* Create server update thread */
+    pthread_t server_thread;
+    ret = pthread_create(&server_thread, NULL, server_update_thread, NULL);
+    if (ret != 0) {
+        fprintf(stderr, "Failed to create server thread: %s\n", strerror(ret));
+        running = 0;
+        goto cleanup;
+    }
+
     /* Create user input thread */
     ret = pthread_create(&input_thread, NULL, user_input_thread, NULL);
     if (ret != 0) {
@@ -109,11 +134,13 @@ int main(int argc, char *argv[])
 
     /* Wait for threads to complete */
     pthread_join(comp_thread, NULL);
+    pthread_join(server_thread, NULL);
     pthread_join(input_thread, NULL);
 
 cleanup:
     restore_terminal();
     close_devices();
+    pthread_mutex_destroy(&state_mutex);
     printf("\nProgram terminated.\n");
     return 0;
 }
@@ -170,15 +197,27 @@ static int read_comparator_status(void)
         return -1;
 
     /* Read status from device */
+    /* Note: Kernel may return 0 (EOF) if file position was at end, but it resets
+     * position to 0. So if we get EOF, we should try reading again once to get
+     * the fresh status data.
+     */
     n = read(temp_fd, buffer, sizeof(buffer) - 1);
+    
     if (n < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK)
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
             perror("read comparator status");
+        }
         return -1;
     }
 
-    if (n == 0)
-        return -1;
+    if (n == 0) {
+        /* EOF - kernel reset position to 0, try reading again to get fresh data */
+        n = read(temp_fd, buffer, sizeof(buffer) - 1);
+        if (n <= 0) {
+            /* Still EOF or error - cannot read status */
+            return -1;
+        }
+    }
 
     buffer[n] = '\0';
 
@@ -192,10 +231,12 @@ static int parse_comparator_status(const char *buf)
     const char *comp_str = strstr(buf, "comparator=");
     const char *period_str = strstr(buf, "period=");
     const char *triggered_str = strstr(buf, "triggered=");
+    int temp_comp_state, temp_triggered;
+    unsigned long temp_period;
     
     if (comp_str) {
         comp_str += 11; /* Skip "comparator=" */
-        if (sscanf(comp_str, "%d", &comparator_state) != 1)
+        if (sscanf(comp_str, "%d", &temp_comp_state) != 1)
             return -1;
     } else {
         return -1;
@@ -203,15 +244,26 @@ static int parse_comparator_status(const char *buf)
     
     if (period_str) {
         period_str += 7; /* Skip "period=" */
-        if (sscanf(period_str, "%lu", &check_period) != 1)
+        if (sscanf(period_str, "%lu", &temp_period) != 1)
             return -1;
+    } else {
+        temp_period = check_period;  /* Keep current if not in buffer */
     }
     
     if (triggered_str) {
         triggered_str += 10; /* Skip "triggered=" */
-        if (sscanf(triggered_str, "%d", &comparator_triggered) != 1)
+        if (sscanf(triggered_str, "%d", &temp_triggered) != 1)
             return -1;
+    } else {
+        temp_triggered = comparator_triggered;  /* Keep current if not in buffer */
     }
+    
+    /* Update shared state (thread-safe) */
+    pthread_mutex_lock(&state_mutex);
+    comparator_state = temp_comp_state;
+    check_period = temp_period;
+    comparator_triggered = temp_triggered;
+    pthread_mutex_unlock(&state_mutex);
     
     return 0;
 }
@@ -292,8 +344,66 @@ static int set_timer_period(unsigned long period)
         return -1;
     }
 
+    pthread_mutex_lock(&state_mutex);
     check_period = period;
+    pthread_mutex_unlock(&state_mutex);
     return 0;
+}
+
+/* ========== Server LED control ========== */
+
+static int set_server_led_state(int connected)
+{
+    char cmd[CMD_BUFFER];
+    ssize_t n;
+
+    if (led_fd < 0)
+        return -1;
+
+    if (connected) {
+        snprintf(cmd, sizeof(cmd), "server_connected");
+    } else {
+        snprintf(cmd, sizeof(cmd), "server_disconnected");
+    }
+
+    n = write(led_fd, cmd, strlen(cmd));
+    if (n < 0) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK)
+            perror("write server LED state");
+        return -1;
+    }
+
+    return 0;
+}
+
+/* ========== Server update function ========== */
+
+static int update_server(void)
+{
+    int comp_state, stove_on;
+    unsigned long period;
+
+    /* Get current state (thread-safe) */
+    pthread_mutex_lock(&state_mutex);
+    comp_state = comparator_state;
+    stove_on = stove_state;
+    period = check_period;
+    pthread_mutex_unlock(&state_mutex);
+
+    /* Dummy server update - just print as if sending to server */
+    printf("\n[Server Update] Sending to server:\n");
+    printf("    Comparator State: %s\n", comp_state ? "HIGH" : "LOW");
+    printf("    Stove State: %s\n", stove_on ? "ON" : "OFF");
+    printf("    Timer Period: %lu ms\n", period);
+    printf("    LED States:\n");
+    printf("      - Temperature (Red): %s\n", comp_state ? "ABOVE" : "BELOW");
+    printf("      - Stove (Blue): %s\n", stove_on ? "ON" : "OFF");
+    printf("      - Server (Green): %s\n", server_connected ? "CONNECTED" : "DISCONNECTED");
+    printf("    [Server Response: OK]\n");
+
+    /* Simulate successful server update */
+    /* TODO: Replace with actual server communication */
+    return 1;  /* Return 1 for success, 0 for failure */
 }
 
 /* ========== Thread functions ========== */
@@ -313,8 +423,10 @@ static void *comparator_monitor_thread(void *arg)
 
     /* Read initial status */
     if (read_comparator_status() == 0) {
+        pthread_mutex_lock(&state_mutex);
         update_led_temp_state(comparator_state);
         print_status(comparator_state, stove_state, comparator_triggered);
+        pthread_mutex_unlock(&state_mutex);
     }
 
     /* Continuously wait for events from kernel module */
@@ -358,14 +470,20 @@ static void *comparator_monitor_thread(void *arg)
                     /* Interrupt event - threshold exceeded (rising edge) */
                     printf("\n[!] THRESHOLD EXCEEDED - Comparator triggered!\n");
                     printf("    %s", buffer);
+                    
+                    /* Update state (thread-safe) */
+                    pthread_mutex_lock(&state_mutex);
                     comparator_triggered = 1;
                     comparator_state = 1;
+                    pthread_mutex_unlock(&state_mutex);
                     
                     /* Update LED to show threshold exceeded */
                     update_led_temp_state(1);
                     
                     /* Display updated status */
+                    pthread_mutex_lock(&state_mutex);
                     print_status(comparator_state, stove_state, comparator_triggered);
+                    pthread_mutex_unlock(&state_mutex);
                 } else if (strstr(buffer, "STATUS_UPDATE") != NULL) {
                     /* Timer update - periodic status from kernel timer */
                     printf("\n[Timer] %s", buffer);
@@ -375,19 +493,26 @@ static void *comparator_monitor_thread(void *arg)
                     if (state_str) {
                         int new_state;
                         if (sscanf(state_str + 6, "%d", &new_state) == 1) {
+                            pthread_mutex_lock(&state_mutex);
                             if (new_state != comparator_state) {
                                 comparator_state = new_state;
                                 printf("    [State changed to: %s]\n", 
                                        comparator_state ? "HIGH" : "LOW");
+                                pthread_mutex_unlock(&state_mutex);
                                 
                                 /* Update LED based on new state */
                                 update_led_temp_state(comparator_state);
+                                
+                                pthread_mutex_lock(&state_mutex);
                             }
+                            print_status(comparator_state, stove_state, comparator_triggered);
+                            pthread_mutex_unlock(&state_mutex);
+                        } else {
+                            pthread_mutex_lock(&state_mutex);
+                            print_status(comparator_state, stove_state, comparator_triggered);
+                            pthread_mutex_unlock(&state_mutex);
                         }
                     }
-                    
-                    /* Display updated status */
-                    print_status(comparator_state, stove_state, comparator_triggered);
                 } else {
                     /* Unknown message type */
                     printf("\n[Event] %s", buffer);
@@ -397,6 +522,47 @@ static void *comparator_monitor_thread(void *arg)
     }
 
     printf("\n[Monitor] Comparator monitor thread stopped\n");
+    return NULL;
+}
+
+static void *server_update_thread(void *arg)
+{
+    (void)arg;
+    unsigned long period_ms;
+
+    printf("[Server] Server update thread started\n");
+
+    while (running) {
+        /* Get current period (thread-safe) */
+        pthread_mutex_lock(&state_mutex);
+        period_ms = check_period;
+        pthread_mutex_unlock(&state_mutex);
+
+        /* Wait for timer period */
+        usleep(period_ms * 1000);  /* Convert ms to microseconds */
+
+        if (!running)
+            break;
+
+        /* Update server */
+        if (update_server() > 0) {
+            /* Server update successful */
+            if (!server_connected) {
+                server_connected = 1;
+                set_server_led_state(1);
+                printf("[Server] Connection established - LED updated\n");
+            }
+        } else {
+            /* Server update failed */
+            if (server_connected) {
+                server_connected = 0;
+                set_server_led_state(0);
+                printf("[Server] Connection lost - LED updated\n");
+            }
+        }
+    }
+
+    printf("\n[Server] Server update thread stopped\n");
     return NULL;
 }
 
@@ -437,7 +603,7 @@ static void *user_input_thread(void *arg)
             } else if (strncmp(input, "period=", 7) == 0) {
                 if (sscanf(input + 7, "%lu", &period_val) == 1) {
                     if (set_timer_period(period_val) == 0) {
-                        printf("[Command] Timer period set to %lu ms\n", period_val);
+                        printf("[Command] Timer period set to %lu ms (affects both kernel timer and server updates)\n", period_val);
                     } else {
                         printf("[Error] Failed to set timer period\n");
                     }
