@@ -393,13 +393,24 @@ static ssize_t mytempsensor_write(struct file *filp, const char __user *buf, siz
   char kbuf[128];
   size_t c = min(count, sizeof(kbuf) - 1);
 
-  if (c == 0)
-    return 0;
+  /* Debug: verify write handler is being called */
+  printk(KERN_INFO "mytempsensor_comp: write() called with count=%zu\n", count);
 
-  if (copy_from_user(kbuf, buf, c))
+  if (c == 0) {
+    printk(KERN_WARNING "mytempsensor_comp: write() called with c=0\n");
+    return 0;
+  }
+
+  if (copy_from_user(kbuf, buf, c)) {
+    printk(KERN_ERR "mytempsensor_comp: copy_from_user failed\n");
     return -EFAULT;
+  }
 
   kbuf[c] = '\0';
+  
+  /* Debug: show what we received from userspace */
+  printk(KERN_INFO "mytempsensor_comp: received buffer: [%.*s] (length %zu)\n", 
+         (int)c, kbuf, c);
 
   /* Parse command */
   temp_parse_write_command(kbuf, c);
@@ -597,9 +608,41 @@ static int temp_build_status(char *dst, size_t maxlen)
 static void temp_parse_write_command(const char *buf, size_t count)
 {
   unsigned long val;
+  size_t len = count;
+
+  /* Debug: show what we're trying to parse */
+  printk(KERN_INFO "mytempsensor_comp: parse_write_command called with: [%.*s] (count=%zu)\n", 
+         (int)count, buf, count);
+
+  /* Trim trailing whitespace/newlines */
+  while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r' || 
+                     buf[len-1] == ' ' || buf[len-1] == '\t')) {
+    len--;
+  }
+
+  if (len == 0) {
+    printk(KERN_WARNING "mytempsensor_comp: empty command after trimming\n");
+    return;
+  }
+
+  printk(KERN_INFO "mytempsensor_comp: trimmed command: [%.*s] (length %zu)\n", 
+         (int)len, buf, len);
 
   if (strncmp(buf, "period=", 7) == 0) {
-    if (kstrtoul(buf + 7, 10, &val) == 0 && val >= 100 && val <= 60000) {
+    /* Extract the numeric value after "period=" */
+    const char *num_str = buf + 7;
+    size_t num_len = len - 7;
+    
+    /* Trim any leading whitespace in the number */
+    while (num_len > 0 && (*num_str == ' ' || *num_str == '\t')) {
+      num_str++;
+      num_len--;
+    }
+    
+    printk(KERN_INFO "mytempsensor_comp: parsing period value: [%.*s]\n", 
+           (int)num_len, num_str);
+    
+    if (kstrtoul(num_str, 10, &val) == 0 && val >= 100 && val <= 60000) {
       unsigned long old_period = check_period_ms;
       check_period_ms = val;
       printk(KERN_INFO "mytempsensor_comp: check period changed from %lu ms to %lu ms\n", 
@@ -614,9 +657,11 @@ static void temp_parse_write_command(const char *buf, size_t count)
       printk(KERN_INFO "mytempsensor_comp: timer rescheduled with new period\n");
     } else {
       printk(KERN_WARNING "mytempsensor_comp: invalid period value (range: 100-60000 ms)\n");
+      printk(KERN_WARNING "mytempsensor_comp: attempted to parse: [%.*s], result: %lu\n", 
+             (int)num_len, num_str, val);
     }
   } else {
-    printk(KERN_WARNING "mytempsensor_comp: unknown command: %.*s\n", (int)count, buf);
+    printk(KERN_WARNING "mytempsensor_comp: unknown command: [%.*s]\n", (int)len, buf);
     printk(KERN_INFO "mytempsensor_comp: Valid commands: period=<ms>\n");
   }
 }
