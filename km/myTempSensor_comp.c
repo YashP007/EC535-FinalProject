@@ -267,7 +267,6 @@ fail_gpio:
 fail_notif:
   kfree(notification_buffer);
   notification_buffer = NULL;
-fail_buf:
   kfree(mytempsensor_buffer);
 fail_chrdev:
   unregister_chrdev(mytempsensor_major, "mytempsensor_comp");
@@ -321,6 +320,7 @@ static ssize_t mytempsensor_read(struct file *filp, char __user *buf, size_t cou
   int n;
   char *src_buf;
   int src_len;
+  char tbuf[512];
 
   /* Reset position if starting new read OR if we've finished previous read */
   /* Always check for new notifications when starting a fresh read */
@@ -354,7 +354,6 @@ static ssize_t mytempsensor_read(struct file *filp, char __user *buf, size_t cou
       /* No notification, return status string */
       spin_unlock_irqrestore(&notification_lock, flags);
       
-      char tbuf[512];
       n = temp_build_status(tbuf, sizeof(tbuf));
       n = min(n, (int)capacity);
       memcpy(mytempsensor_buffer, tbuf, n);
