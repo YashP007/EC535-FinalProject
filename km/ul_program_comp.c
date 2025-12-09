@@ -169,9 +169,6 @@ static int read_comparator_status(void)
     if (temp_fd < 0)
         return -1;
 
-    /* Seek to beginning */
-    lseek(temp_fd, 0, SEEK_SET);
-
     /* Read status from device */
     n = read(temp_fd, buffer, sizeof(buffer) - 1);
     if (n < 0) {
@@ -339,12 +336,7 @@ static void *comparator_monitor_thread(void *arg)
 
         if (ret > 0 && (pfd.revents & (POLLIN | POLLRDNORM))) {
             /* Event occurred - read notification from kernel */
-            /* Reset file position to start for new notification */
-            if (lseek(temp_fd, 0, SEEK_SET) < 0) {
-                perror("lseek");
-                break;
-            }
-            
+            /* Note: Kernel automatically resets file position after each read */
             ssize_t n = read(temp_fd, buffer, sizeof(buffer) - 1);
             if (n < 0) {
                 if (errno == EINTR || errno == EAGAIN)
