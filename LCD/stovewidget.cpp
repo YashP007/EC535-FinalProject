@@ -134,7 +134,7 @@ StoveWidget::StoveWidget(QWidget *parent)
         update(); // repaint
 
         syncLedWithSimState();
-        sendTempToAdafruit();  //
+        //sendTempToAdafruit();  //
     });
 
     updateTempLabel();
@@ -182,17 +182,17 @@ void StoveWidget::setCurrentTemp(double tempF)
     update();
 
     syncLedWithSimState();
-    sendTempToAdafruit();
+    //sendTempToAdafruit();
 }
 
-// void StoveWidget::updateTempLabel()
-// {
-//     m_tempLabel->setText(
-//         tr("Current: %1°F    Target: %2°F")
-//             .arg(m_currentTempF, 0, 'f', 1)
-//             .arg(m_targetTempF)
-//         );
-// }
+void StoveWidget::updateTempLabel()
+{
+    // m_tempLabel->setText(
+    //     tr("Current: %1°F    Target: %2°F")
+    //         .arg(m_currentTempF, 0, 'f', 1)
+    //         .arg(m_targetTempF)
+    //     );
+}
 
 
 // LED device helpers
