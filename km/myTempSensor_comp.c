@@ -51,7 +51,7 @@
  * ----------------------------------------------------------------------------
  *
  * The module supports poll()/select() for interrupt-driven notifications.
- * When the hardware comparator triggers (GPIO goes high), the module
+ * When the hardware comparator triggers (GPIO goes low), the module
  * immediately wakes up waiting processes.
  *
  * Usage in C program:
@@ -86,7 +86,7 @@
  * The module operates in two modes:
  *
  * 1. Hardware comparator interrupts:
- *    - Monitors GPIO 26 for hardware comparator signals (rising edge)
+ *    - Monitors GPIO 26 for hardware comparator signals (falling edge)
  *    - Immediately notifies userspace when triggered via interrupt
  *    - Sets triggered flag when interrupt occurs
  *
@@ -129,7 +129,7 @@ MODULE_DESCRIPTION("Temperature sensor kernel module for BBB (Comparator-Only)")
 MODULE_AUTHOR("Yash Patel");
 
 /* --- GPIO assignments (BBB header numbers -> kernel GPIO numbers) --- */
-#define COMPARATOR_GPIO    26   /* GPIO pin for hardware comparator IRQ (active high) */
+#define COMPARATOR_GPIO    26   /* GPIO pin for hardware comparator IRQ (active low) */
 
 /* --- Buffer sizing for char device I/O --- */
 enum { capacity = 4096, bite = 128 };
@@ -186,7 +186,7 @@ static int   mytempsensor_len;
 static int comparator_irq = -1;          /* assigned by request_irq */
 
 /* --- Globals: Comparator state --- */
-static atomic_t comparator_triggered = ATOMIC_INIT(0);      /* Hardware comparator triggered (set on rising edge) */
+static atomic_t comparator_triggered = ATOMIC_INIT(0);      /* Hardware comparator triggered (set on falling edge) */
 static int comparator_previous_state = 0;                   /* Previous GPIO state for edge detection */
 static unsigned long check_period_ms = 15000;                /* Timer period in milliseconds (default 15s) */
 
@@ -457,13 +457,13 @@ static void temp_gpio_free(void)
 /* IRQ handler for comparator */
 static irqreturn_t comparator_isr(int irq, void *dev_id)
 {
-  /* Hardware comparator triggered (rising edge: low -> high) */
+  /* Hardware comparator triggered (falling edge: high -> low) */
   int comp_current = gpio_get_value(COMPARATOR_GPIO);
   
-  /* Only notify if this is a new transition (edge-triggered) */
-  if (comp_current && !comparator_previous_state) {
+  /* Only notify if this is a new transition (edge-triggered: high -> low) */
+  if (!comp_current && comparator_previous_state) {
     atomic_set(&comparator_triggered, 1);
-    comparator_previous_state = 1;  /* Update previous state */
+    comparator_previous_state = 0;  /* Update previous state */
     temp_notify_comparator_triggered();
   }
   
@@ -481,8 +481,8 @@ static int temp_irq_request(void)
     return -EINVAL;
   }
 
-  /* Request IRQ for rising edge (active high) */
-  ret = request_irq(comparator_irq, comparator_isr, IRQF_TRIGGER_RISING,
+  /* Request IRQ for falling edge (active low) */
+  ret = request_irq(comparator_irq, comparator_isr, IRQF_TRIGGER_FALLING,
                     "mytempsensor_comp_comparator", NULL);
   if (ret) {
     printk(KERN_ERR "mytempsensor_comp: failed to request IRQ %d\n", comparator_irq);
@@ -541,9 +541,9 @@ static void temp_notify_comparator_triggered(void)
   int comp_current = gpio_get_value(COMPARATOR_GPIO);
   char msg[256];
 
-  /* Build notification message for rising edge event */
+  /* Build notification message for falling edge event */
   snprintf(msg, sizeof(msg),
-           "THRESHOLD_EXCEEDED: Comparator triggered (GPIO=%d, state=%d)\n",
+           "THRESHOLD_EXCEEDED: Comparator triggered (GPIO=%d, state=%d, falling edge)\n",
            COMPARATOR_GPIO, comp_current);
 
   temp_notify_userspace(msg);
