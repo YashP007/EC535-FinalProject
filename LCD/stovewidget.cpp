@@ -19,8 +19,6 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
-#define O_NONBLOCK 0
-
 StoveWidget::StoveWidget(QWidget *parent)
     : QWidget(parent),
     m_on(false),
@@ -38,7 +36,7 @@ StoveWidget::StoveWidget(QWidget *parent)
     m_aioKey  = "aio_Fmad035K4dRzhUgbvKHHZfjT9QF7";
 
     // initial tempertaure
-    m_tempHistory.reserve(0);
+    m_tempHistory.reserve(120);
     m_tempHistory.append(m_currentTempF);
 
     //power button
@@ -206,7 +204,7 @@ void StoveWidget::initLedDevice()
     }
 
     // Connected so green LED comes on
-    writeLedCommand("server_connected\n");
+    writeLedCommand("server_connected");
 }
 
 void StoveWidget::writeLedCommand(const QByteArray &cmd)
@@ -228,9 +226,9 @@ void StoveWidget::syncLedWithSimState()
 
     // Blue is on off type
     if (m_on) {
-        writeLedCommand("stove_on\n");
+        writeLedCommand("stove_on");
     } else {
-        writeLedCommand("stove_off\n");
+        writeLedCommand("stove_off");
     }
 
     // Red bad
@@ -240,9 +238,9 @@ void StoveWidget::syncLedWithSimState()
 
     if (nowAbove != m_lastTempAbove) {
         if (nowAbove) {
-            writeLedCommand("temp_above\n");
+            writeLedCommand("temp_above");
         } else {
-            writeLedCommand("temp_below\n");
+            writeLedCommand("temp_below");
         }
         m_lastTempAbove = nowAbove;
     }
