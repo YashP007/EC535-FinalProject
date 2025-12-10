@@ -252,6 +252,7 @@ static int led_gpio_request_config(void)
   ret |= gpio_direction_output(RED,   0);
   ret |= gpio_direction_output(GREEN, 0);
   ret |= gpio_direction_output(BLUE,  0);
+  printk(KERN_ERR "mysignal: gpio (%d, %d, %d) request/config success\n", RED, GREEN, BLUE);
   if (ret) goto err;
 
   return 0;

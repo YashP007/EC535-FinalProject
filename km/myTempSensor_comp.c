@@ -441,7 +441,7 @@ static int temp_gpio_request_config(void)
 
   ret = gpio_direction_input(COMPARATOR_GPIO);
   if (ret) goto err;
-
+  printk(KERN_ERR "mytempsensor_comp: gpio %d request/config success (digital only)\n", COMPARATOR_GPIO);
   return 0;
 
 err:
