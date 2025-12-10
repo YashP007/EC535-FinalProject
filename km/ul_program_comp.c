@@ -279,10 +279,14 @@ static int update_led_temp_state(int comp_state)
         return -1;
 
     /* Update LED based on comparator state */
-    if (comp_state) {
-        snprintf(cmd, sizeof(cmd), "temp_above");
+    /* Note: With active low comparator (falling edge):
+     *   LOW (0) = threshold exceeded = temp_above
+     *   HIGH (1) = normal = temp_below
+     */
+    if (comp_state == 0) {
+        snprintf(cmd, sizeof(cmd), "temp_above");  /* LOW = threshold exceeded */
     } else {
-        snprintf(cmd, sizeof(cmd), "temp_below");
+        snprintf(cmd, sizeof(cmd), "temp_below");  /* HIGH = normal */
     }
 
     n = write(led_fd, cmd, strlen(cmd));
@@ -467,18 +471,19 @@ static void *comparator_monitor_thread(void *arg)
                 
                 /* Check message type */
                 if (strstr(buffer, "THRESHOLD_EXCEEDED") != NULL) {
-                    /* Interrupt event - threshold exceeded (rising edge) */
+                    /* Interrupt event - threshold exceeded (falling edge: GPIO goes LOW) */
                     printf("\n[!] THRESHOLD EXCEEDED - Comparator triggered!\n");
                     printf("    %s", buffer);
                     
                     /* Update state (thread-safe) */
+                    /* Note: With falling edge, threshold exceeded means GPIO is LOW (0) */
                     pthread_mutex_lock(&state_mutex);
                     comparator_triggered = 1;
-                    comparator_state = 1;
+                    comparator_state = 0;  /* Falling edge: GPIO goes LOW when threshold exceeded */
                     pthread_mutex_unlock(&state_mutex);
                     
                     /* Update LED to show threshold exceeded */
-                    update_led_temp_state(1);
+                    update_led_temp_state(0);  /* LOW state = threshold exceeded */
                     
                     /* Display updated status */
                     pthread_mutex_lock(&state_mutex);
