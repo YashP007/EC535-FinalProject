@@ -66,7 +66,10 @@ StoveWidget::StoveWidget(QWidget *parent)
     // Text label for current/target temperature
     m_tempLabel = new QLabel(this);
     m_tempLabel->setAlignment(Qt::AlignCenter);
-
+    QFont tempFont = m_tempLabel->font();
+    tempFont.setPointSize(10);              
+    m_tempLabel->setFont(tempFont);
+    m_tempLabel->setStyleSheet("color: white;");
     //  title and power button on top,
 
     // slider row at the bottom.
@@ -76,10 +79,10 @@ StoveWidget::StoveWidget(QWidget *parent)
     QLabel *title = new QLabel(tr("EC535 Smart Stove"), this);
     title->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     QFont titleFont = title->font();
-    titleFont.setPointSize(18);
+    titleFont.setPointSize(14);
     titleFont.setBold(true);
     title->setFont(titleFont);
-
+    title->setStyleSheet("color: white;");
     topRow->addWidget(title);
     topRow->addStretch();
     topRow->addWidget(m_powerButton, 0, Qt::AlignRight);
@@ -132,7 +135,7 @@ StoveWidget::StoveWidget(QWidget *parent)
         update(); // repaint
 
         syncLedWithSimState();
-        sendTempToAdafruit();  //
+        //sendTempToAdafruit();  //
     });
 
     updateTempLabel();
@@ -180,14 +183,14 @@ void StoveWidget::setCurrentTemp(double tempF)
     update();
 
     syncLedWithSimState();
-    sendTempToAdafruit();
+    //sendTempToAdafruit();
 }
 
 void StoveWidget::updateTempLabel()
 {
     m_tempLabel->setText(
         tr("Current: %1°F    Target: %2°F")
-            .arg(m_currentTempF, 0, 'f', 1)
+            .arg(m_currentTempF, 0, 'f', 0)
             .arg(m_targetTempF)
         );
 }
@@ -379,11 +382,11 @@ void StoveWidget::paintEvent(QPaintEvent *event)
     p.drawLine(QPointF(graphInner.left(),  yRef),
                QPointF(graphInner.right(), yRef));
 
-    // label it
-    p.setPen(Qt::yellow);
-    p.drawText(graphInner.left(),
-               yRef - 8,
-               tr("60°F reference"));
+    // // label it
+    // p.setPen(Qt::yellow);
+    // p.drawText(graphInner.left(),
+    //            yRef - 8,
+    //            tr("60°F reference"));
 
 
 
@@ -464,12 +467,13 @@ void StoveWidget::paintEvent(QPaintEvent *event)
     p.setFont(hwFont);
 
     QString hwText = overLimit
-                         ? tr("HW LIMIT: HOT (>= %1°F)").arg(hwLimitF, 0, 'f', 0)
-                         : tr("HW LIMIT: SAFE (< %1°F)").arg(hwLimitF, 0, 'f', 0);
+                         ? tr("HW LIMIT: HOT")
+                         : tr("HW LIMIT: SAFE");
 
     QRect textRect = hwRect.adjusted(circleSize + 22, 0, -8, 0);
     p.drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, hwText);
-
+    QFont f = p.font();
+    f.setPointSize(4);
     //
     // stove graphic
     //
@@ -593,9 +597,11 @@ void StoveWidget::paintEvent(QPaintEvent *event)
         status = tr("WARNING: HOT! %1°F")
                      .arg(m_currentTempF, 0, 'f', 1);
     } else {
-        status = tr("Heating... %1°F (Target: %2°F)")
-                     .arg(m_currentTempF, 0, 'f', 1)
-                     .arg(m_targetTempF);
+        status = tr("Heating... %1°F")
+                .arg(m_currentTempF, 0, 'f', 1);
+        // status = tr("Heating... %1°F (Target: %2°F)")
+        //              .arg(m_currentTempF, 0, 'f', 1)
+        //              .arg(m_targetTempF);
     }
 
     if (m_on && m_currentTempF >= dangerThresholdF) {
@@ -605,7 +611,7 @@ void StoveWidget::paintEvent(QPaintEvent *event)
     }
 
     QFont statusFont = p.font();
-    statusFont.setPointSize(10);
+    statusFont.setPointSize(9);
     p.setFont(statusFont);
     p.drawText(statusBand, Qt::AlignCenter, status);
 }
