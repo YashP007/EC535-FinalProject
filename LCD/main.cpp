@@ -8,7 +8,7 @@ int main(int argc, char *argv[])
     StoveWidget w;
     w.setWindowTitle("EC535 Stove");
     
-    w.showFullScreen();
+    w.show();
     // either that or w.show();
     //^^^
     return app.exec();
