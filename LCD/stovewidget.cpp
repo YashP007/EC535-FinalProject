@@ -190,11 +190,11 @@ void StoveWidget::setCurrentTemp(double tempF)
 
 void StoveWidget::updateTempLabel()
 {
-    // m_tempLabel->setText(
-    //     tr("Current: %1°F    Target: %2°F")
-    //         .arg(m_currentTempF, 0, 'f', 1)
-    //         .arg(m_targetTempF)
-    //     );
+    m_tempLabel->setText(
+        tr("Current: %1°F    Target: %2°F")
+            .arg(m_currentTempF, 0, 'f', 0)
+            .arg(m_targetTempF)
+        );
 }
 
 
@@ -384,11 +384,11 @@ void StoveWidget::paintEvent(QPaintEvent *event)
     p.drawLine(QPointF(graphInner.left(),  yRef),
                QPointF(graphInner.right(), yRef));
 
-    // label it
-    p.setPen(Qt::yellow);
-    p.drawText(graphInner.left(),
-               yRef - 8,
-               tr("60°F reference"));
+    // // label it
+    // p.setPen(Qt::yellow);
+    // p.drawText(graphInner.left(),
+    //            yRef - 8,
+    //            tr("60°F reference"));
 
 
 
@@ -469,12 +469,13 @@ void StoveWidget::paintEvent(QPaintEvent *event)
     p.setFont(hwFont);
 
     QString hwText = overLimit
-                         ? tr("HW LIMIT: HOT (>= %1°F)").arg(hwLimitF, 0, 'f', 0)
-                         : tr("HW LIMIT: SAFE (< %1°F)").arg(hwLimitF, 0, 'f', 0);
+                         ? tr("HW LIMIT: HOT")
+                         : tr("HW LIMIT: SAFE");
 
     QRect textRect = hwRect.adjusted(circleSize + 22, 0, -8, 0);
     p.drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, hwText);
-
+    QFont f = p.font();
+    f.setPointSize(4);
     //
     // stove graphic
     //
@@ -598,9 +599,11 @@ void StoveWidget::paintEvent(QPaintEvent *event)
         status = tr("WARNING: HOT! %1°F")
                      .arg(m_currentTempF, 0, 'f', 1);
     } else {
-        status = tr("Heating... %1°F (Target: %2°F)")
-                     .arg(m_currentTempF, 0, 'f', 1)
-                     .arg(m_targetTempF);
+        status = tr("Heating... %1°F")
+                .arg(m_currentTempF, 0, 'f', 1);
+        // status = tr("Heating... %1°F (Target: %2°F)")
+        //              .arg(m_currentTempF, 0, 'f', 1)
+        //              .arg(m_targetTempF);
     }
 
     if (m_on && m_currentTempF >= dangerThresholdF) {
