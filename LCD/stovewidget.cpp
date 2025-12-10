@@ -68,20 +68,23 @@ StoveWidget::StoveWidget(QWidget *parent)
     // Text label for current/target temperature
     m_tempLabel = new QLabel(this);
     m_tempLabel->setAlignment(Qt::AlignCenter);
-
+    QFont tempFont = m_tempLabel->font();
+    tempFont.setPointSize(10);              
+    m_tempLabel->setFont(tempFont);
+    m_tempLabel->setStyleSheet("color: white;");
     //  title and power button on top,
 
     // slider row at the bottom.
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
 
     QHBoxLayout *topRow = new QHBoxLayout;
-    QLabel *title = new QLabel(tr("Safe Stove"), this);
+    QLabel *title = new QLabel(tr("EC535 Smart Stove"), this);
     title->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     QFont titleFont = title->font();
-    titleFont.setPointSize(18);
+    titleFont.setPointSize(14);
     titleFont.setBold(true);
     title->setFont(titleFont);
-
+    title->setStyleSheet("color: white;");
     topRow->addWidget(title);
     topRow->addStretch();
     topRow->addWidget(m_powerButton, 0, Qt::AlignRight);
@@ -94,7 +97,7 @@ StoveWidget::StoveWidget(QWidget *parent)
 
     // Bottom row with slider
     QHBoxLayout *bottomRow = new QHBoxLayout;
-    bottomRow->addWidget(new QLabel(tr("Stove Temp"), this));
+    bottomRow->addWidget(new QLabel(tr("Target Temp"), this));
     bottomRow->addWidget(m_tempSlider);
     mainLayout->addLayout(bottomRow);
 
@@ -250,27 +253,38 @@ void StoveWidget::syncLedWithSimState()
 
 //adafruit
 
-// void StoveWidget::sendTempToAdafruit()
-// {
+void StoveWidget::sendTempToAdafruit()
+{
+    if (m_aioUser.isEmpty() || m_aioKey.isEmpty()) {
+        qWarning() << "Adafruit IO user/key not set";
+        return;
+    }
 
-//     // When Wi-Fi is present, this posts the current temperature to:
-//     // https://io.adafruit.com/api/v2/<user>/feeds/stove-temperature/data
-//     QString urlStr = QString("https://io.adafruit.com/api/v2/%1/feeds/stove-temperature/data")
-//                          .arg(m_aioUser);
-//     QUrl url(urlStr);
-//     QNetworkRequest req(url);
+    // When Wi-Fi is present, this posts the current temperature to:
+    // https://io.adafruit.com/api/v2/<user>/feeds/stove-temperature/data
+    QString urlStr = QString("https://io.adafruit.com/api/v2/%1/feeds/stove-temperature/data")
+                         .arg(m_aioUser);
+    QUrl url(urlStr);
+    QNetworkRequest req(url);
 
-//     QJsonObject obj;
-//     obj["value"] = m_currentTempF;
-//     QJsonDocument doc(obj);
-//     QByteArray body = doc.toJson(QJsonDocument::Compact);
+    QJsonObject obj;
+    obj["value"] = m_currentTempF;
+    QJsonDocument doc(obj);
+    QByteArray body = doc.toJson(QJsonDocument::Compact);
 
-//     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-//     req.setRawHeader("X-AIO-Key", m_aioKey.toUtf8());
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    req.setRawHeader("X-AIO-Key", m_aioKey.toUtf8());
 
-//     QNetworkReply *reply = m_net.post(req, body);
+    QNetworkReply *reply = m_net.post(req, body);
 
-// }
+    // Debug
+    QObject::connect(reply, &QNetworkReply::finished, reply, [reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            qWarning() << "Adafruit POST failed:" << reply->errorString();
+        }
+        reply->deleteLater();
+    });
+}
 
 
 void StoveWidget::paintEvent(QPaintEvent *event)
@@ -284,8 +298,8 @@ void StoveWidget::paintEvent(QPaintEvent *event)
 
     {
         QLinearGradient bgGrad(rect().topLeft(), rect().bottomLeft());
-        bgGrad.setColorAt(0.0, QColor(0, 0, 0));
-        bgGrad.setColorAt(1.0, QColor(0, 0, 0));
+        bgGrad.setColorAt(0.0, QColor(15, 15, 20));
+        bgGrad.setColorAt(1.0, QColor(35, 35, 45));
         p.fillRect(rect(), bgGrad);
     }
 
@@ -372,9 +386,9 @@ void StoveWidget::paintEvent(QPaintEvent *event)
 
     // label it
     p.setPen(Qt::yellow);
-    // p.drawText(graphInner.left(),
-    //            yRef - 8,
-    //            tr("60°F reference"));
+    p.drawText(graphInner.left(),
+               yRef - 8,
+               tr("60°F reference"));
 
 
 
@@ -451,7 +465,7 @@ void StoveWidget::paintEvent(QPaintEvent *event)
     // Text label
     p.setPen(Qt::white);
     QFont hwFont = p.font();
-    hwFont.setPointSize(6);
+    hwFont.setPointSize(9);
     p.setFont(hwFont);
 
     QString hwText = overLimit
@@ -596,7 +610,7 @@ void StoveWidget::paintEvent(QPaintEvent *event)
     }
 
     QFont statusFont = p.font();
-    statusFont.setPointSize(10);
+    statusFont.setPointSize(9);
     p.setFont(statusFont);
     p.drawText(statusBand, Qt::AlignCenter, status);
 }
