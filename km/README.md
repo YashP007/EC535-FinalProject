@@ -13,11 +13,9 @@ This directory contains kernel modules and userspace programs for an embedded st
 | File | Type | Description |
 |------|------|-------------|
 | `Makefile` | Build script | Builds kernel modules and userspace programs |
-| `mySignalLED.c` | Kernel module | RGB LED control for system status display (used in final implementation) |
-| `myTempSensor.c` | Kernel module | Temperature sensor using ADC and comparator (development version) |
-| `myTempSensor_comp.c` | Kernel module | Temperature sensor using comparator only (used in final implementation) |
-| `ul_program.c` | Userspace program | Program for ADC-based monitoring (development version) |
-| `ul_program_comp.c` | Userspace program | Program for comparator-only monitoring with Adafruit control/debugging (used in final implementation) |
+| `mySignalLED.c` | Kernel module | RGB LED control for system status display |
+| `myTempSensor_comp.c` | Kernel module | Temperature sensor using comparator only |
+| `ul_program_comp.c` | Userspace program | Program for comparator-only monitoring with Adafruit control/debugging |
 | `README.md` | Documentation | This file |
 
 ---
@@ -39,8 +37,8 @@ make all
 # Build only kernel modules
 make
 
-# Build only userspace programs
-make ul_program ul_program_comp
+# Build only userspace program
+make ul_program_comp
 
 # Clean build artifacts
 make clean
@@ -172,20 +170,6 @@ Interfaces with `myTempSensor_comp.ko` and `mySignalLED.ko`. Provides Adafruit-b
 - Timer period control
 - Server update simulation
 - Multi-threaded architecture
-
----
-
-## Additional Files (Development Versions)
-
-### myTempSensor.c
-
-ADC-based temperature sensor module (development version, not used in final implementation). Uses BBB ADC channel 0 (AIN0) and hardware comparator on GPIO 26.
-
-**Device File:** `/dev/mytempsensor` (major 62, minor 0)
-
-### ul_program.c
-
-Userspace program for ADC-based monitoring (development version, not used in final implementation). Interfaces with `myTempSensor.ko` and `mySignalLED.ko`.
 
 ---
 

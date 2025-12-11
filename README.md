@@ -3,9 +3,6 @@
 **EC535: Introduction to Embedded Systems (Fall 2025)**  
 **Prof. Ayșe Coskun**  
 **Final Project**
-
-Project Document, Write-Ups, and Presentations Working Folder: https://drive.google.com/drive/folders/1KpyYJWhn5TtKM3BjVu6GFhhm5DTW13XL?usp=drive_link
-
 ---
 
 ## Project Overview
@@ -198,7 +195,7 @@ The system consists of three main layers:
 │ Kernel  │                  │                            │
 │ Modules │                  │                            │
 │ ┌───────▼───────┐  ┌───────▼───────┐  ┌──────────────┐│
-│ │ mySignalLED   │  │ myTempSensor  │  │ myTempSensor ││
+│ │ mySignalLED   │  │ myTempSensor_comp │  │ myTempSensor ││
 │ │ .ko           │  │ .ko           │  │ _comp.ko     ││
 │ └───────┬───────┘  └───────┬───────┘  └──────┬───────┘│
 └─────────┼────────────────────┼─────────────────┼────────┘
