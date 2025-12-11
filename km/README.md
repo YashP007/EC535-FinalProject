@@ -1,147 +1,211 @@
-# Stove Monitoring LED Kernel Module
+# EC535 Final Project - Kernel Modules and Userspace Programs
 
 ## Overview
-This kernel module (`mySignalLED`) controls an RGB LED for an embedded stove monitoring system. It displays three states through a color sequence:
-- **Green**: Server connection status (connected/disconnected)
-- **Blue**: Stove on/off status
-- **Red**: Temperature threshold status (above/below)
 
-## Building and Loading
+This directory contains kernel modules and userspace programs for an embedded stove monitoring system running on BeagleBone Black. The system monitors temperature using hardware comparator, displays status via RGB LED, and provides userspace interfaces for control and monitoring.
 
-### Build the module:
+**Final Implementation (Demo Day):** The system used `myTempSensor_comp.c`, `ul_program_comp.c` (for Adafruit-based control and debugging), and `mySignalLED.c`.
+
+---
+
+## Files Overview
+
+| File | Type | Description |
+|------|------|-------------|
+| `Makefile` | Build script | Builds kernel modules and userspace programs |
+| `mySignalLED.c` | Kernel module | RGB LED control for system status display (used in final implementation) |
+| `myTempSensor.c` | Kernel module | Temperature sensor using ADC and comparator (development version) |
+| `myTempSensor_comp.c` | Kernel module | Temperature sensor using comparator only (used in final implementation) |
+| `ul_program.c` | Userspace program | Program for ADC-based monitoring (development version) |
+| `ul_program_comp.c` | Userspace program | Program for comparator-only monitoring with Adafruit control/debugging (used in final implementation) |
+| `README.md` | Documentation | This file |
+
+---
+
+## Building
+
+### Prerequisites
+
+- BeagleBone Black with Linux kernel 4.19.82-ti-rt-r33
+- Cross-compilation toolchain: `arm-linux-gnueabihf-gcc`
+- Kernel source tree at `$(EC535)/bbb/stock/stock-linux-4.19.82-ti-rt-r33`
+
+### Build Commands
+
 ```bash
+# Build all modules and programs
+make all
+
+# Build only kernel modules
 make
+
+# Build only userspace programs
+make ul_program ul_program_comp
+
+# Clean build artifacts
+make clean
 ```
 
-### Load the module:
+---
+
+## Final Implementation Setup
+
+### Kernel Modules Used
+
+1. **mySignalLED.ko** - RGB LED control module
+2. **myTempSensor_comp.ko** - Comparator-only temperature sensor module
+
+### Userspace Program Used
+
+1. **ul_program_comp** - Comparator monitoring with Adafruit-based control and debugging
+
+### Quick Start
+
 ```bash
+# Build everything
+make all
+
+# Load kernel modules
 insmod mySignalLED.ko
+insmod myTempSensor_comp.ko
+
+# Create device files
+mknod /dev/mysignal c 61 0
+mknod /dev/mytempsensor_comp c 63 0
+chmod 666 /dev/mysignal /dev/mytempsensor_comp
+
+# Set initial states
+echo "stove_on" > /dev/mysignal
+echo "temp_below" > /dev/mysignal
+echo "server_connected" > /dev/mysignal
+echo "period=15000" > /dev/mytempsensor_comp
+
+# Run userspace program
+./ul_program_comp
 ```
 
-### Unload the module:
+---
+
+## Kernel Module: mySignalLED
+
+**Device File:** `/dev/mysignal` (major 61, minor 0)
+
+Controls RGB LED displaying three states:
+- **Green**: Server connection status
+- **Blue**: Stove on/off status  
+- **Red**: Temperature threshold status
+
+### Commands
+
 ```bash
-rmmod mySignalLED
-```
-
-### Check module status:
-```bash
-dmesg -c -s 20
-```
-
-## Device File
-The module creates a character device at `/dev/mysignal` (major 61, minor 0).
-
-**Note**: You may need to create the device node manually:
-```bash
-sudo mknod /dev/mysignal c 61 0
-sudo chmod 666 /dev/mysignal
-```
-
-## Usage
-
-### Setting States
-
-Write commands to `/dev/mysignal` to control the system states:
-
-#### Stove State:
-```bash
-echo "stove_on" | sudo tee /dev/mysignal
-echo "stove_off" | sudo tee /dev/mysignal
-```
-
-#### Temperature State:
-```bash
-echo "temp_above" | sudo tee /dev/mysignal
-echo "temp_below" | sudo tee /dev/mysignal
-```
-
-#### Server Connection State:
-```bash
-echo "server_connected" | sudo tee /dev/mysignal
-echo "server_disconnected" | sudo tee /dev/mysignal
-```
-
-### Configuring Timing
-
-#### Set Color Display Duration (milliseconds):
-```bash
-echo "color_duration=1000" | sudo tee /dev/mysignal
-```
-- Valid range: 1-10000 ms
-- Default: 1000 ms (1 second)
-
-#### Set Sleep Duration Between Cycles (milliseconds):
-```bash
-echo "sleep_duration=2000" | sudo tee /dev/mysignal
-```
-- Valid range: 1-60000 ms
-- Default: 2000 ms (2 seconds)
-
-### Reading Status
-
-Read the current status:
-```bash
-cat /dev/mysignal
-```
-
-Output format:
-```
-stove=<on|off> temp=<above|below> server=<connected|disconnected> color_duration=<ms> sleep_duration=<ms> leds={red:<on|off>,green:<on|off>,blue:<on|off>} state=<state_number>
-```
-
-## LED Behavior
-
-### Normal Sequence (when server is connected):
-1. **Sleep** (2 seconds default)
-2. **Green LED** (1 second) - Shows server connection status
-3. **Blue LED** (1 second) - Shows stove on/off (off if stove is off)
-4. **Red LED** (1 second) - Shows temperature threshold status
-5. Repeat from step 1
-
-### Special Case (when server is disconnected):
-1. **Sleep** (2 seconds default)
-2. **All LEDs ON** (1 second) - Visual indicator that sequence is starting
-3. **Blue LED** (1 second) - Shows stove on/off (off if stove is off)
-4. **Red LED** (1 second) - Shows temperature threshold status
-5. Repeat from step 1
-
-## Example Usage
-
-### Complete setup example:
-```bash
-# Load module
-sudo insmod mySignalLED.ko
-
 # Set states
-echo "stove_on" | sudo tee /dev/mysignal
-echo "temp_above" | sudo tee /dev/mysignal
-echo "server_connected" | sudo tee /dev/mysignal
+echo "stove_on" > /dev/mysignal
+echo "stove_off" > /dev/mysignal
+echo "temp_above" > /dev/mysignal
+echo "temp_below" > /dev/mysignal
+echo "server_connected" > /dev/mysignal
+echo "server_disconnected" > /dev/mysignal
 
-# Adjust timing (optional)
-echo "color_duration=1500" | sudo tee /dev/mysignal
-echo "sleep_duration=3000" | sudo tee /dev/mysignal
+# Configure timing
+echo "color_duration=1000" > /dev/mysignal  # 1-10000 ms
+echo "sleep_duration=2000" > /dev/mysignal  # 1-60000 ms
 
-# Check status
+# Read status
 cat /dev/mysignal
 ```
 
-## GPIO Pin Assignments
+### GPIO Pins
+
 - **RED**: GPIO 67 (Temperature threshold)
 - **GREEN**: GPIO 44 (Server connection)
 - **BLUE**: GPIO 68 (Stove on/off)
 
-**Note**: Verify these GPIO numbers match your hardware configuration.
+### LED Sequence
+
+**Normal (server connected):** Sleep → Green → Blue → Red → repeat  
+**Disconnected:** Sleep → All ON → Blue → Red → repeat
+
+---
+
+## Kernel Module: myTempSensor_comp
+
+**Device File:** `/dev/mytempsensor_comp` (major 63, minor 0)
+
+Monitors temperature threshold using hardware comparator only (no ADC). Uses GPIO 26 for comparator input with falling edge interrupts.
+
+### Commands
+
+```bash
+# Read status
+cat /dev/mytempsensor_comp
+# Output: comparator=<0|1> comparator_gpio=<0|1> period=<ms> triggered=<0|1>
+
+# Set timer period
+echo "period=15000" > /dev/mytempsensor_comp  # 100-60000 ms
+```
+
+### Features
+
+- Hardware comparator interrupts (GPIO 26, falling edge)
+- Periodic polling for status updates
+- Supports `poll()`/`select()` and `fasync()` (SIGIO) for notifications
+- Default check period: 15 seconds
+
+---
+
+## Userspace Program: ul_program_comp
+
+Interfaces with `myTempSensor_comp.ko` and `mySignalLED.ko`. Provides Adafruit-based control and debugging interface.
+
+### Commands
+
+- `on` - Turn stove ON
+- `off` - Turn stove OFF
+- `period=<ms>` - Set timer period
+- `status` - Read current status
+- `q` - Quit program
+
+### Features
+
+- Comparator monitoring via interrupts and polling
+- LED control based on comparator state
+- Timer period control
+- Server update simulation
+- Multi-threaded architecture
+
+---
+
+## Additional Files (Development Versions)
+
+### myTempSensor.c
+
+ADC-based temperature sensor module (development version, not used in final implementation). Uses BBB ADC channel 0 (AIN0) and hardware comparator on GPIO 26.
+
+**Device File:** `/dev/mytempsensor` (major 62, minor 0)
+
+### ul_program.c
+
+Userspace program for ADC-based monitoring (development version, not used in final implementation). Interfaces with `myTempSensor.ko` and `mySignalLED.ko`.
+
+---
 
 ## Troubleshooting
 
-- **Module won't load**: Check `dmesg` for error messages. Verify GPIO pins are not in use.
-- **Device file not found**: Create it manually with `mknod` (see Device File section).
-- **Unknown command warning**: Check command spelling. Valid commands are listed above.
-- **LEDs not responding**: Verify GPIO pin assignments match your hardware.
+- **Module won't load:** Check `dmesg` for errors, verify GPIO pins available
+- **Device file not found:** Create with `mknod` and set permissions with `chmod 666`
+- **LEDs not responding:** Verify GPIO pin assignments match hardware
+- **Comparator not triggering:** Check GPIO 26 wiring and comparator output
+
+---
 
 ## Notes
-- All state changes are atomic and thread-safe
-- Timing changes take effect on the next cycle
-- The module continuously cycles through the LED sequence while loaded
-- Invalid timing values are rejected with a warning message
 
+- All state changes are atomic and thread-safe
+- GPIO pin numbers may need adjustment based on hardware configuration
+- Comparator-only version is more power-efficient (no ADC usage)
+
+---
+
+## Author
+
+Yash Patel - EC535 Final Project
