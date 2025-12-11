@@ -343,4 +343,4 @@ qmake && make
 
 ## Author
 
-Yash Patel - EC535 Final Project (Fall 2025)
+Yash Patel & Leah Jones- EC535 Final Project (Fall 2025)
